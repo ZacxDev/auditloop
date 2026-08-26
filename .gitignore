@@ -1,0 +1,27 @@
+# Build artifacts
+/bin/
+auditloop
+/out/
+
+# Generated CSS (source is static/input.css; output is built by `make css`).
+# Committed so the Docker/Go build and tests don't require the Tailwind CLI.
+# (Comment the next line out if you prefer to build it in CI instead.)
+# static/output.css
+
+# Node
+/node_modules/
+
+# Databases & artifacts (local dev/test scratch)
+*.db
+*.db-shm
+*.db-wal
+/artifacts/
+
+# Self-audit (ux-audit) run dirs: timestamped screenshots + findings.md per run.
+/tests/e2e/ux-audit-runs/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

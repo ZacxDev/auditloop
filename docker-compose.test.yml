@@ -1,0 +1,38 @@
+# Local/CI infra for the S3 + Postgres integration tests (NOT needed for the
+# hermetic `go test ./...`, which uses the filesystem storage backend + sqlite).
+#
+#   docker-compose -f docker-compose.test.yml up -d
+#   S3_ENDPOINT=127.0.0.1:9100 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin \
+#     DATABASE_DRIVER=postgres DATABASE_URL=postgres://auditloop:auditloop@127.0.0.1:5433/auditloop?sslmode=disable \
+#     go test ./internal/storage/ ./internal/db/ -v
+#
+# Ports are offset (5433/9100/9101) to avoid clashing with a local pg/minio.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: auditloop
+      POSTGRES_PASSWORD: auditloop
+      POSTGRES_DB: auditloop
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auditloop"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9100:9000" # S3 API
+      - "9101:9001" # console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 10

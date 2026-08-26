@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/* Tailwind v4 CSS-first config: brand + surface + semantic-status tokens, a radius
+   scale, typography + motion tokens — all as CSS vars in the @theme block (no JS
+   config file). Dark-theme-first: the app has no light mode. Values stay sRGB hex
+   (fully supported in v4; oklch is optional polish, deferred to avoid palette churn).
+
+   This is the shared design-system FOUNDATION consumed by the target/run/dashboard
+   redesigns: use `.card`/`.card-interactive`, `.section-title`, `.badge-*`,
+   `.btn-*`, the `info/success/warning/danger` tokens (never raw blue/emerald/amber/
+   red), and gate every transform/entrance behind `motion-safe:`. */
+@theme {
+  /* ---- brand ---- */
+  --color-brand: #4f46e5;         /* solid brand on white (buttons) */
+  /* Lighter brand shade for text ON dark surfaces. The base brand (#4f46e5) is only
+     ~2.4:1 on the dark tinted cards (a11y color-contrast fail); this indigo-300 clears
+     ≥4.5:1 (WCAG AA). Use `text-brand-light` for brand-colored text/links on dark
+     backgrounds; keep `bg-brand` (brand on white) for solid buttons. */
+  --color-brand-light: #a5b4fc;
+  --color-brand-hover: #4338ca;   /* darker brand for solid-button hover (keeps text contrast) */
+
+  /* ---- surfaces & structure ---- */
+  --color-surface: #0b1120;       /* app background */
+  --color-card: #111827;          /* raised card */
+  --color-card-hover: #161f33;    /* card hover / elevated (subtle lift) */
+  --color-line: #1f2937;          /* borders / dividers */
+  --color-ink: #e5e7eb;           /* primary text */
+  --color-muted: #94a3b8;         /* secondary text / labels */
+
+  /* ---- semantic status (replace the ad-hoc blue/emerald/amber/red) ----
+     One hue per role; the *-fg is the AA-safe text/icon shade on the dark surface,
+     the base 500 is only used at low alpha (/10../30) for tints/borders. These map
+     one-for-one onto the palette utilities they replace, so `bg-info/15` == the old
+     `bg-blue-500/15` and `text-info-fg` == `text-blue-400` (pixel-identical). */
+  --color-info: #3b82f6;      --color-info-fg: #60a5fa;      /* was blue-500 / blue-400 */
+  --color-success: #10b981;   --color-success-fg: #34d399;   /* was emerald-500 / -400 */
+  --color-warning: #f59e0b;   --color-warning-fg: #fbbf24;   /* was amber-500 / -400 */
+  --color-danger: #ef4444;    --color-danger-fg: #f87171;    /* was red-500 / -400 */
+
+  /* ---- radius scale ---- */
+  --radius-sm: 0.25rem;   /* inputs, small chips */
+  /* NB: no bare `--radius` override — leaving it unset keeps Tailwind's default
+     `.rounded` (0.25rem) app-wide so this foundation stays additive. Redesigns
+     apply softer radii deliberately via `rounded-lg`/`rounded-xl` per view. */
+  --radius-lg: 0.5rem;    /* cards */
+  --radius-xl: 0.75rem;   /* hero / feature cards */
+  /* rounded-full stays as-is for pills/dots */
+
+  /* ---- typography ---- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+  /* ---- motion tokens ---- */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);   /* entrances — decelerate */
+  --ease-standard:  cubic-bezier(0.4, 0, 0.2, 1);    /* hovers / general */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* ---- motion: named animations (generate `animate-*` utilities) ---- */
+  /* fade+rise: default entrance for htmx-swapped fragments & cards */
+  --animate-enter: enter var(--duration-slow) var(--ease-out-quart) both;
+  @keyframes enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  /* soft fade only (for text/badge swaps where a rise looks wrong) */
+  --animate-fade: fade var(--duration-base) var(--ease-standard) both;
+  @keyframes fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  /* live pulse — a gentle breathe for the "● Live" status dot */
+  --animate-live: live 2s var(--ease-standard) infinite;
+  @keyframes live {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+}
+
+/* Scan Go + JS sources for class usage. */
+@source "../components";
+@source "../handlers";
+@source "../static/js";
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* One clear primary action per view vs. secondary/utility actions. btn-primary is the
+   solid brand "go" action (Run audit / New target); btn-secondary is the muted outline
+   used for save/config/create actions; btn-accent is the soft "LLM action" affordance
+   (Draft notes / Regenerate / Run walkthrough) — so they don't compete for attention.
+   Color transitions are ungated (safe, help everyone); only transforms are motion-safe. */
+@layer components {
+  .btn-primary {
+    @apply rounded bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover;
+    transition-duration: var(--duration-fast);
+  }
+  .btn-secondary {
+    @apply rounded border border-line px-4 py-2 font-medium text-ink transition-colors hover:bg-card-hover;
+    transition-duration: var(--duration-fast);
+  }
+  /* the "LLM action" soft button, previously copy-pasted as bg-blue-500/15… */
+  .btn-accent {
+    @apply rounded bg-info/15 px-3 py-1.5 text-sm font-medium text-info-fg transition-colors hover:bg-info/25;
+    transition-duration: var(--duration-fast);
+  }
+
+  /* --- card --- */
+  /* .card / .badge base utilities are inlined (not @apply-ed) into their variants —
+     Tailwind v4 @apply only accepts utility classes, not sibling component classes. */
+  .card {
+    @apply rounded-lg border border-line bg-card p-4;
+  }
+  .card-interactive {
+    @apply rounded-lg border border-line bg-card p-4 transition
+           motion-safe:hover:-translate-y-0.5 hover:border-brand-light/40 hover:bg-card-hover;
+    transition-duration: var(--duration-base);
+    transition-timing-function: var(--ease-standard);
+  }
+
+  /* --- section header (the uppercase label repeated across the app) --- */
+  .section-title {
+    @apply text-sm font-semibold uppercase tracking-wide text-muted;
+  }
+
+  /* --- native <details> accordion (config sections) ---
+     Hide the browser's default disclosure marker (we render our own chevron) and
+     rotate that chevron 90° when the <details> is open. The rotation transition is
+     auto-neutralized for prefers-reduced-motion users by the reduced-motion baseline
+     at the bottom of this file (it zeroes transition-duration globally). */
+  .accordion-summary { list-style: none; }
+  .accordion-summary::-webkit-details-marker { display: none; }
+  .accordion-chevron {
+    transition: transform var(--duration-base) var(--ease-standard);
+  }
+  details[open] > .accordion-summary .accordion-chevron { transform: rotate(90deg); }
+
+  /* --- badge / status pill (base + tone modifiers) --- */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .badge-info {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-info/15 text-info-fg;
+  }
+  .badge-success {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-success/15 text-success-fg;
+  }
+  .badge-warning {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-warning/15 text-warning-fg;
+  }
+  .badge-danger {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-danger/15 text-danger-fg;
+  }
+}
+
+/* Placeholders should read as a faint HINT, not pre-filled content: muted + italic so
+   they're visibly distinct from real values (placeholders are exempt from the WCAG
+   contrast floor, but this stays legible on the dark surface). */
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--color-muted) 65%, transparent);
+  font-style: italic;
+}
+
+/* Respect prefers-reduced-motion globally — motion is opt-in. All new motion is applied
+   via `motion-safe:` (so it never fires under reduce), and this baseline also neutralizes
+   any ungated animation/transition (e.g. the run-page spinner, htmx progress bars) for
+   users who ask for less motion. This app audits a11y; it should model it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

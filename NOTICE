@@ -1,0 +1,35 @@
+auditloop
+Copyright (c) 2026 Zachary Lowden
+Licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party components distributed with this source tree
+================================================================================
+
+axe-core
+--------
+File:     internal/crawler/axe.min.js  (vendored, unmodified, v4.12.1)
+Copyright (c) 2015-2026 Deque Systems, Inc.
+License:  Mozilla Public License, Version 2.0 (MPL-2.0)
+          https://mozilla.org/MPL/2.0/
+Upstream: https://github.com/dequelabs/axe-core
+
+This file is distributed unmodified and retains its original copyright header.
+MPL-2.0 is a file-level copyleft: this file remains under MPL-2.0 regardless of
+the MIT license covering the rest of this repository. If you modify it, you must
+make the modified file available under MPL-2.0. axe-core's own third-party
+attributions are listed upstream in LICENSE-3RD-PARTY.txt.
+
+Go module dependencies
+----------------------
+All Go dependencies (see go.mod) are distributed under permissive licenses
+(MIT, BSD-3-Clause, or Apache-2.0). They are fetched at build time and are not
+vendored into this repository. Run `go mod download` and inspect the module
+cache, or `go-licenses report ./...`, for the authoritative per-module list.
+
+Build-time npm dependencies
+---------------------------
+tailwindcss / @tailwindcss/cli (MIT), @playwright/test (Apache-2.0),
+@axe-core/playwright (MPL-2.0), axe-core (MPL-2.0). These are devDependencies
+used to build CSS and to run the optional self-audit harness; they are not
+redistributed in this repository (node_modules is git-ignored).

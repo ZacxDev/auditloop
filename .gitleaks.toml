@@ -1,0 +1,51 @@
+# gitleaks configuration for auditloop.
+#
+# The repository contains no secrets: authentication material is env-supplied at
+# runtime and never committed. gitleaks' `generic-api-key` heuristic does fire on
+# a handful of test fixtures and storage-key assignments, so each is allowlisted
+# BY ITS SPECIFIC VALUE OR PATH below — deliberately narrowly, so the scanner can
+# still go red on anything new.
+#
+#   gitleaks detect --source . --redact
+#
+# To confirm the config has not been widened into uselessness, plant a realistic
+# secret in a tracked file and check that gitleaks still reports it.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Test fixtures and non-secret identifiers. Each entry is an exact literal that
+appears in committed test code — not a pattern that could mask a real credential.
+"""
+regexTarget = "match"
+regexes = [
+  # tests/e2e/playwright.ux-audit.config.ts — a throwaway AES key that exists only
+  # to enable the login-recipe UI in a local self-audit run. Documented in place.
+  '''00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff''',
+  # internal/db/login_recipes_test.go — placeholder ciphertext, not ciphertext.
+  '''ENCRYPTED-BLOB-[0-9]''',
+]
+
+[[allowlists]]
+description = """
+Object-storage key assignments. `*A11yDigestKey` / `digestKey` hold an S3 object
+path such as "acme/<run-id>/<page-slug>/a11y.json"; the high-entropy segment is a
+UUID, and the value is neither secret nor a credential.
+"""
+regexTarget = "line"
+regexes = [
+  '''(?i)(a11ydigestkey|digestkey)\s*[:=]''',
+]
+
+[[allowlists]]
+description = """
+tests/e2e — the fixed development user id used when DEV_MODE bypasses auth. It is
+a constant in internal/auth, not a token, and grants nothing outside DEV_MODE.
+"""
+paths = ['''tests/e2e/.*_test\.go''']
+regexTarget = "line"
+regexes = [
+  '''auth\.DefaultDevUser''',
+]
