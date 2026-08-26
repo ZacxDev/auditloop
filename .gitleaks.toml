@@ -33,10 +33,16 @@ description = """
 Object-storage key assignments. `*A11yDigestKey` / `digestKey` hold an S3 object
 path such as "acme/<run-id>/<page-slug>/a11y.json"; the high-entropy segment is a
 UUID, and the value is neither secret nor a credential.
+
+Deliberately narrow: the right-hand side must be another IDENTIFIER, never a
+string literal. An earlier version matched the whole line on the variable name
+alone, which would also have suppressed `digestKey = "<a real secret>"` — an
+allowlist keyed on a variable's NAME is an invitation to hide a secret by
+choosing that name.
 """
 regexTarget = "line"
 regexes = [
-  '''(?i)(a11ydigestkey|digestkey)\s*[:=]''',
+  '''(?i)(a11ydigestkey|digestkey)\s*[:=]+\s*[A-Za-z_][A-Za-z0-9_.]*\s*$''',
 ]
 
 [[allowlists]]
