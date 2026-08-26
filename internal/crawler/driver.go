@@ -165,6 +165,21 @@ type DriveOptions struct {
 	StallGrace      time.Duration
 	ProbeTimeout    time.Duration
 	SkipRenderProbe bool
+	// StartBudget bounds BROWSER STARTUP (network.Enable + the device-metrics
+	// override, and fetch.Enable inside enableInterception). 0 → DefaultStartBudget.
+	//
+	// It is deliberately SEPARATE from StallGrace (#50). StallGrace tunes the
+	// SESSION watchdog — "how far past its own deadline will we tolerate a stalled
+	// drive" — but startup has no deadline of its own, so it was using StallGrace as
+	// its ENTIRE budget. Lowering StallGrace to make the session watchdog fire
+	// quickly therefore also starved startup, and under load real Chromium startup
+	// exceeded it: the start watchdog fired first and the session watchdog never got
+	// the chance. MEASURED as 3 failures in 5 runs of
+	// TestDriveSessionWatchdogReturnsAnInfraFailedTrace at load average ~3.5.
+	//
+	// The two are different questions and now have different knobs. Bringing up a
+	// browser costs what it costs regardless of how patient the drive loop is.
+	StartBudget time.Duration
 }
 
 const (
@@ -227,6 +242,9 @@ func Drive(ctx context.Context, opts DriveOptions) (*DriveTrace, error) {
 	grace := opts.StallGrace
 	if grace <= 0 {
 		grace = DefaultStallGrace
+	}
+	if opts.StartBudget <= 0 {
+		opts.StartBudget = DefaultStartBudget
 	}
 
 	// SESSION-LEVEL watchdog (#41). The drive loop makes many chromedp calls, each
@@ -293,7 +311,7 @@ func driveSession(ctx context.Context, opts DriveOptions, grace time.Duration, s
 	defer cancelTab()
 	// Publish the kill lever to the session watchdog in Drive (#41).
 	setKill(func() { cancelTab(); cancelAlloc(); cancelRun() })
-	if err := runHard("start", tabCtx, grace, func() { cancelTab(); cancelAlloc() }, network.Enable(),
+	if err := runHard("start", tabCtx, opts.StartBudget, func() { cancelTab(); cancelAlloc() }, network.Enable(),
 		emulation.SetDeviceMetricsOverride(1440, 900, 1, false)); err != nil {
 		// Infra: the browser could not be brought up — no claim about the site (#45).
 		return nil, fmt.Errorf("driver: browser start: %w (%w)", err, ErrDriverInfra)
@@ -314,7 +332,7 @@ func driveSession(ctx context.Context, opts DriveOptions, grace time.Duration, s
 	// walkthrough breaks in the safe default. We arm it AFTER login, before the drive
 	// loop (below), so the funnel is still fully submit-guarded — only the login phase
 	// is exempt. One Fetch listener serves both phases.
-	ic, err := enableInterception(tabCtx, guard, false, grace, func() { cancelTab(); cancelAlloc() })
+	ic, err := enableInterception(tabCtx, guard, false, opts.StartBudget, func() { cancelTab(); cancelAlloc() })
 	if err != nil {
 		// Infra: the browser could not be instrumented — no claim about the site.
 		return nil, fmt.Errorf("driver: enable interception: %w (%w)", err, ErrDriverInfra)

@@ -173,10 +173,40 @@ func TestDriveSessionWatchdogReturnsAnInfraFailedTrace(t *testing.T) {
 		AllowedHosts: []string{"127.0.0.1"},
 		// The planner is the hang: the drive loop parks inside NextAction past any
 		// context deadline, exactly as chromedp's internal mutex does in production.
-		Planner:         &parkingPlanner{},
-		Success:         action.SuccessAssertion{URLContains: "/never-reached", TimeoutMs: 200},
-		OverallTimeout:  time.Second,
-		StallGrace:      500 * time.Millisecond,
+		Planner: &parkingPlanner{},
+		Success: action.SuccessAssertion{URLContains: "/never-reached", TimeoutMs: 200},
+		// TIMING, and why this number (#50). This test cannot be faster than the whole
+		// pre-planner path, because the SESSION watchdog it exercises only fires at
+		// OverallTimeout+StallGrace, and OverallTimeout ALSO bounds everything before
+		// the parking planner is reached (runCtx). The original 1s raced that path:
+		// first the START watchdog pre-empted the session one, then — once startup got
+		// its own budget — runCtx expired mid-dial ("browser start: context deadline
+		// exceeded"). One number was standing in for three unrelated budgets.
+		//
+		// The budget must exceed TIME-TO-PLANNER, which is NOT the same as startup
+		// time — a first estimate sized this against startup alone (~1.7s) and was
+		// wrong by ~6x, because ~1.4s of the path is post-navigation work the planner
+		// waits on (the success probe, safeShot, buildInteractiveDigest,
+		// captureA11yDigest). MEASURED end-to-end by instrumenting driveSession:
+		//
+		//   idle (load ~19):      2.67s  3.06s  3.51s
+		//   loaded (load 22-32):  3.34s … 4.91s  6.07s   <- worst observed
+		//
+		// 20s is ~3.3x the worst observed on a deliberately oversubscribed 8-core box.
+		// The earlier 8s left only ~1.3x, which is a threshold moved rather than a
+		// dependency removed — and this test exists precisely because a moved
+		// threshold comes back. The cost is ~20s of suite time, paid for determinism.
+		//
+		// NOTE the adjacent guarantee is conditional: the parking planner makes the
+		// watchdog fire deterministically ONLY once the planner is reached. If the
+		// budget is ever cut below time-to-planner again, this test fails with a
+		// message blaming the driver rather than the budget — which is what the
+		// numbers above are here to prevent.
+		OverallTimeout: 20 * time.Second,
+		StallGrace:     500 * time.Millisecond,
+		// StartBudget stays at its generous default ON PURPOSE: it must not be the
+		// thing that fires here. The assertions below (drive 1, start 0) are exactly
+		// the claim that was flaking.
 		SkipRenderProbe: true,
 		AllowLoopback:   true,
 		ChromiumPath:    chromium,
@@ -232,12 +262,32 @@ func TestDriveInnerStallReturnsAnInfraFailedTrace(t *testing.T) {
 	t.Cleanup(func() { setRunTasks(nil) })
 
 	tr, err := Drive(context.Background(), DriveOptions{
-		BaseURL:         fx.URL + "/",
-		AllowedHosts:    []string{"127.0.0.1"},
-		Planner:         &fixedPlanner{},
-		Success:         action.SuccessAssertion{URLContains: "/welcome", TimeoutMs: 500},
-		OverallTimeout:  20 * time.Second, // deliberately far from the inner budget
-		StallGrace:      500 * time.Millisecond,
+		BaseURL:        fx.URL + "/",
+		AllowedHosts:   []string{"127.0.0.1"},
+		Planner:        &fixedPlanner{},
+		Success:        action.SuccessAssertion{URLContains: "/welcome", TimeoutMs: 500},
+		OverallTimeout: 20 * time.Second, // deliberately far from the inner budget
+		// This test is the MIRROR of the session one: here the START budget is the
+		// short one, because the stall being exercised is inside a startup call
+		// (enableInterception's fetch.Enable) and its own runHard must be what fires.
+		// Stating it explicitly is the point of #50 — which watchdog a test exercises
+		// is now a declared property, not a side effect of one shared knob.
+		//
+		// StallGrace is deliberately LARGE and different from StartBudget, so that what
+		// fires here can only be StartBudget. With both at 500ms the test could not
+		// tell the two knobs apart at all.
+		//
+		// 🔴 HONEST COVERAGE LIMIT, measured, not assumed: the parked call lands on the
+		// FIRST startup runHard (driver.go's network.Enable), so this test pins THAT
+		// call site's budget and not enableInterception's. Reverting only
+		// enableInterception's budget to `grace` still SURVIVES a green package — I ran
+		// that mutant and it passed in 0.55s, i.e. the stall fired before
+		// enableInterception was ever reached. Production impact of that mutant is nil
+		// today (both knobs default to 20s), but half of #50 can be undone without a
+		// test going red. Covering it needs a stub that parks on the fetch.Enable call
+		// specifically; not done here.
+		StallGrace:      10 * time.Second,
+		StartBudget:     500 * time.Millisecond,
 		SkipRenderProbe: true,
 		AllowLoopback:   true,
 		ChromiumPath:    chromium,

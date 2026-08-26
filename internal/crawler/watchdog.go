@@ -58,6 +58,22 @@ var ErrBrowserProbe = errors.New("browser failed to render a trivial page")
 // second, tighter timeout.
 const DefaultStallGrace = 20 * time.Second
 
+// DefaultStartBudget is the HARD wall-clock budget for bringing a browser up
+// (network.Enable + the device-metrics override + fetch.Enable). It is a SEPARATE
+// constant from DefaultStallGrace, not an alias, because the two answer different
+// questions: grace is "how far past its own deadline do we tolerate a stalled
+// call", while this is "how long may starting a browser reasonably take". They
+// happen to share a value today; a future change to one must not silently move
+// the other.
+//
+// Why it exists (#50): the driver's startup calls have no inner deadline of their
+// own, so they were using StallGrace as their entire budget. A test lowering
+// StallGrace to make the SESSION watchdog fire quickly therefore also starved
+// startup, and under load real Chromium startup blew the reduced budget — the
+// start watchdog fired first and the session watchdog never ran. Measured at 3
+// failures in 5 runs at load average ~3.5.
+const DefaultStartBudget = 20 * time.Second
+
 // DefaultProbeTimeout bounds the startup render probe. The probe is one loopback
 // HTTP navigation plus a layout read, measured at ~40-75ms on a healthy browser,
 // so this is a large multiple of the expected cost and does not meaningfully
