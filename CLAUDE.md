@@ -935,17 +935,35 @@ applied to the SEPARATE walkthrough axis — the two `diff_json`s never entangle
   subrouter) gains a `regression` block `{prev_walkthrough_id, outcome_changed, prev_outcome,
   outcome, is_regression, resolved, stuck_step_delta, new_task_blockers[],
   resolved_task_blockers[], blockers_compared}` (present once a baseline exists) — a consumer
-  (an external CI gate) gates on it. 🔴 **The consumer predicate CHANGED in #45 — the old
-  `is_regression || len(new_task_blockers) > 0` is now UNSAFE ON ITS OWN.** The current one:
+  (an external CI gate) gates on it. 🔴 **The consumer predicate CHANGED TWICE — in #45, and
+  again on 2026-08-27. `new_task_blockers` is now ADVISORY and MUST NOT fail a build.** The
+  current one:
 
   ```
   if infra_failed || (regression && !regression.outcome_compared):  → INFRASTRUCTURE error;
         RETRY, do not report a product verdict
-  elif regression && (regression.is_regression || len(regression.new_task_blockers) > 0):
+  elif regression && regression.is_regression:
         → REGRESSION; fail the build
+  # new_task_blockers / resolved_task_blockers: REPORT them, never gate on them.
   ```
 
-  **Why this must be adopted, loudly:** before #45 an infra stall surfaced as
+  🔴 **Why the blocker term was removed — MEASURED, not a judgement call
+  (`claudedocs/evaluator-variance-2026-08-27.md`).** Three IDENTICAL evaluation passes over one
+  run (same run id, personas, job, model, `verify=on`) produced a blocker-key stability of
+  **0.22** — 2 of 9 keys present in all three — and `len(new_task_blockers) > 0` fired on
+  **3 of 3** comparisons. **Gating on it fails every build regardless of the product**, which
+  trains everyone to click through the gate: the permanently-red failure mode. Root cause is the
+  IDENTITY KEY, which takes the model's selector spelling verbatim — `main` vs `[role='main']`
+  are one element spelled two ways. **Re-anchoring cannot fix it, also measured:** those anchors
+  are LANDMARKS, and the digest's landmark schema carries **no selector field at all**, while the
+  one class selector the model did cite (`button.press.inline-flex`) occurs **46× across 6 pages**,
+  so it is unresolvably ambiguous. Narrowing the gate to concrete `#id`/`[name=]` anchors gives
+  0/3 firing but only 1 of 9 keys qualifies — an almost-always-empty gate, the #18 silent-no-op
+  failure. **`is_regression` is unaffected and remains the real gate:** outcome/stuck-step
+  regression is DETERMINISTIC and OBSERVED, never LLM-authored. `auditloop_walkthrough_regressions_total`
+  already bumps only on `is_regression`, so the metric was always consistent with this.
+
+  **Why #45's change must be adopted, loudly:** before #45 an infra stall surfaced as
   `is_regression=true`, so the old predicate FAILED the build — a false alarm, but safe.
   It now surfaces as `is_regression=false` with empty `new_task_blockers`, so a gate that
   ignores the infra fields **PASSES a walkthrough that never ran**. The failure direction
@@ -1291,7 +1309,9 @@ invents an anchor, and an invented anchor is unverifiable by construction.
   diff after this deploys sees re-anchored selectors as NEW blockers and the old spellings
   as RESOLVED. A consumer gating on `len(new_task_blockers) > 0` can trip once per target on
   a transition, not a regression — the same shape as the #18 pushed-a11y-id transition, and
-  it self-heals on the next walkthrough.
+  it self-heals on the next walkthrough. **SUPERSEDED 2026-08-27: no consumer should gate on
+  `new_task_blockers` at all** (it churns 3/3 between IDENTICAL runs — see the Phase-4 read-API
+  block), so this transition is now advisory noise rather than a build-breaking event.
 - **Tests (`internal/eval/ground_test.go`):** the measured regression itself (the 4 real
   claims + a real-shaped digest, with `dropContradicted`-alone as the CONTROL that still
   keeps all 4 → the new pipeline keeps 0); listed-verbatim + bare-`#id` kept; re-anchor by
