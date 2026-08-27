@@ -277,15 +277,13 @@ func TestDriveInnerStallReturnsAnInfraFailedTrace(t *testing.T) {
 		// fires here can only be StartBudget. With both at 500ms the test could not
 		// tell the two knobs apart at all.
 		//
-		// 🔴 HONEST COVERAGE LIMIT, measured, not assumed: the parked call lands on the
-		// FIRST startup runHard (driver.go's network.Enable), so this test pins THAT
-		// call site's budget and not enableInterception's. Reverting only
-		// enableInterception's budget to `grace` still SURVIVES a green package — I ran
-		// that mutant and it passed in 0.55s, i.e. the stall fired before
-		// enableInterception was ever reached. Production impact of that mutant is nil
-		// today (both knobs default to 20s), but half of #50 can be undone without a
-		// test going red. Covering it needs a stub that parks on the fetch.Enable call
-		// specifically; not done here.
+		// MEASURED, and the reason this test pins only the FIRST startup call site:
+		// 500ms is SHORTER than a real chromium launch, so the watchdog fires while
+		// call 1 (driver.go's network.Enable, which is what actually boots the browser)
+		// is still in flight — enableInterception is never reached. That is deliberate
+		// here; the sibling test below
+		// (TestDriveEnableInterceptionHonoursItsOwnStartBudget) covers the second
+		// startup call site by giving the browser room to boot first.
 		StallGrace:      10 * time.Second,
 		StartBudget:     500 * time.Millisecond,
 		SkipRenderProbe: true,
@@ -296,6 +294,107 @@ func TestDriveInnerStallReturnsAnInfraFailedTrace(t *testing.T) {
 
 	if d := readStalls(t, "start") - beforeStart; d != 1 {
 		t.Errorf("phase=start stall delta = %v, want 1 — this test must exercise an INNER stall", d)
+	}
+	if d := readStalls(t, "drive") - beforeDrive; d != 0 {
+		t.Errorf("phase=drive stall delta = %v, want 0 — the session timer must not be what fired here", d)
+	}
+}
+
+// TestDriveEnableInterceptionHonoursItsOwnStartBudget closes the coverage gap the test
+// above declares. driveSession has TWO bounded startup call sites — driver.go's
+// runHard("start", …, network.Enable, …) and, inside enableInterception, a second
+// runHard("start", …, fetch.Enable()) — and #50 made BOTH take opts.StartBudget rather
+// than the session StallGrace. Only the first was pinned: reverting enableInterception's
+// argument to `grace` survived a fully green package (measured: 0.55s), because the
+// sibling test's 500ms budget expires while the browser is still booting on call 1, so
+// the second call site is never reached.
+//
+// The discriminator here is TIMING, not the phase label — both call sites report
+// phase="start", so the counter alone cannot tell them apart. StartBudget is set well
+// ABOVE a real chromium launch (so call 1 completes and call 2 happens at all) and well
+// BELOW StallGrace. Correct code stalls on StartBudget; the `grace` mutant stalls on
+// StallGrace instead, ~5x later, and blows the elapsed bound.
+//
+// The call counter is the POSITIVE CONTROL and is not optional: without it, a slow host
+// whose browser launch exceeds StartBudget would fire the watchdog on call 1, satisfy
+// every other assertion, and pass while testing nothing — the exact vacuity this test
+// exists to remove. It must observe 2 calls: the browser start, then fetch.Enable.
+//
+// 🔴 COVERAGE LIMIT: this needs a REAL browser, so it SKIPS on a browser-less runner and
+// auditloop has no pre-merge CI. There is no browser-free companion (unlike
+// TestDriveClassifiesAStalledSessionWithoutABrowser below) because MEASURED: a stub that
+// returns nil for call 1 and PARKS on call 2 reaches enableInterception fine (calls=2,
+// watchdog fires on schedule) but then Drive NEVER RETURNS — killing an allocator that
+// never allocated hangs, the same deadlock that test's comment records. Do not re-try
+// that shape; it produces a permanently-hanging test, not a cheaper guard.
+func TestDriveEnableInterceptionHonoursItsOwnStartBudget(t *testing.T) {
+	chromium := resolveChromiumT(t)
+	fx := digestFixture()
+	defer fx.Close()
+	beforeDrive, beforeStart := readStalls(t, "drive"), readStalls(t, "start")
+
+	const (
+		startBudget = 6 * time.Second  // > a real chromium launch (measured ~0.5-1s here)
+		stallGrace  = 30 * time.Second // the mutant's budget: 5x startBudget
+		// The session watchdog is runBounded("drive", OverallTimeout+StallGrace) = 150s,
+		// far beyond BOTH, so it cannot be what fires in either the correct or the
+		// mutant run — asserted below as a phase=drive delta of 0.
+		overall = 120 * time.Second
+	)
+
+	// Call 1 goes to a real browser (it is what boots chromium). Call 2 — which can only
+	// be enableInterception's fetch.Enable, since SkipRenderProbe removes the probe's run
+	// and nothing else runs in between — parks on an already-held, non-context-aware
+	// mutex: the #41 shape no context deadline can unwind.
+	park := stuckForever()
+	var calls atomic.Int32
+	setRunTasks(func(ctx context.Context, actions ...chromedp.Action) error {
+		if calls.Add(1) == 1 {
+			return chromedp.Run(ctx, actions...)
+		}
+		return park()
+	})
+	t.Cleanup(func() { setRunTasks(nil) })
+
+	start := time.Now()
+	tr, err := Drive(context.Background(), DriveOptions{
+		BaseURL:         fx.URL + "/",
+		AllowedHosts:    []string{"127.0.0.1"},
+		Planner:         &fixedPlanner{},
+		Success:         action.SuccessAssertion{URLContains: "/welcome", TimeoutMs: 500},
+		OverallTimeout:  overall,
+		StallGrace:      stallGrace,
+		StartBudget:     startBudget,
+		SkipRenderProbe: true,
+		AllowLoopback:   true,
+		ChromiumPath:    chromium,
+	})
+	elapsed := time.Since(start)
+	t.Logf("stalled after %s (StartBudget=%s, StallGrace=%s), runTasks calls=%d",
+		elapsed.Round(time.Millisecond), startBudget, stallGrace, calls.Load())
+
+	assertStalledTrace(t, tr, err)
+
+	// POSITIVE CONTROL — see the doc comment. 1 means the watchdog fired on the browser
+	// start and enableInterception was never reached, i.e. this test measured nothing.
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("runTasks calls = %d, want 2 (browser start, then fetch.Enable) — "+
+			"with 1 the stall fired before enableInterception and this test is vacuous; "+
+			"if the host is simply slow to launch chromium, raise startBudget (and the "+
+			"elapsed bound with it), never lower the assertion", n)
+	}
+
+	// THE MUTATION KILLER: passing `grace` instead of opts.StartBudget makes this
+	// ~stallGrace rather than ~startBudget. The bound sits between the two, nearer the
+	// correct value, so it tolerates a slow launch without tolerating the mutant.
+	if max := startBudget + stallGrace/2; elapsed >= max {
+		t.Errorf("Drive stalled after %s, want < %s — enableInterception must be bounded by "+
+			"StartBudget (%s), not by StallGrace (%s)", elapsed.Round(time.Millisecond), max,
+			startBudget, stallGrace)
+	}
+
+	if d := readStalls(t, "start") - beforeStart; d != 1 {
+		t.Errorf("phase=start stall delta = %v, want 1 — the stall must be an INNER startup one", d)
 	}
 	if d := readStalls(t, "drive") - beforeDrive; d != 0 {
 		t.Errorf("phase=drive stall delta = %v, want 0 — the session timer must not be what fired here", d)

@@ -202,6 +202,10 @@ CI currently runs outside this repository, so pushes here show no checks; the au
 gate is `go build ./... && go vet ./... && gofmt -l . && go test ./...`, which is what a
 contributor should run locally.
 
+This repository is a **generated snapshot** of a private working repo, so a PR here cannot
+be merged in the usual way — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for how a change
+actually lands, and please read it before writing one.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Vendored axe-core is MPL-2.0; see [`NOTICE`](NOTICE).
