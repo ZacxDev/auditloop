@@ -935,7 +935,18 @@ applied to the SEPARATE walkthrough axis — the two `diff_json`s never entangle
   subrouter) gains a `regression` block `{prev_walkthrough_id, outcome_changed, prev_outcome,
   outcome, is_regression, resolved, stuck_step_delta, new_task_blockers[],
   resolved_task_blockers[], blockers_compared}` (present once a baseline exists) — a consumer
-  (an external CI gate) gates on it. 🔴 **The consumer predicate CHANGED TWICE — in #45, and
+  (an external CI job) would gate on it. 🔴 **MEASURED 2026-08-27: this predicate currently has
+  NO KNOWN CONSUMER.** Earlier revisions of this section named an external ux-audit harness's CI as the
+  consumer, and that is WRONG — that harness's gate is
+  `tests/e2e/ux-audit/fetch-findings.mjs --fail-on-regression`, which reads the **P2 push diff**
+  (`new_a11y_rules`, visual `diff_pct`) and contains **zero** references to `new_task_blockers`,
+  `is_regression`, `infra_failed`, `outcome_compared`, or `/api/audit/walkthroughs` (checked with
+  a positive control on the same file: `new_a11y_rules` 3 hits, `diff_pct` 10). Nothing in the
+  GitOps repo references the walkthrough read-API either. **Consequences:** (a) the two predicate
+  changes below carry **no migration debt** — there is no deployed gate to update; (b) the
+  #45 warning that "an unpatched gate SILENTLY PASSES an infra failure" describes a real hazard
+  for whoever adopts this, not an outstanding incident; (c) do not infer from this section that a
+  live consumer exists — re-check before claiming one. **The consumer predicate CHANGED TWICE — in #45, and
   again on 2026-08-27. `new_task_blockers` is now ADVISORY and MUST NOT fail a build.** The
   current one:
 
